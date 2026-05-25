@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bed Level Visualizer</title>
+<meta name="theme-color" content="#171614">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bed Level">
+<meta name="description" content="3D printer bed mesh heatmap — OpenCV box detection + per-cell OCR.">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='36' fill='%23171614'/%3E%3Cg fill='none' stroke='%234f98a3' stroke-width='10' stroke-linecap='round'%3E%3Cpath d='M24 110h132'/%3E%3Cpath d='M45 110V66'/%3E%3Cpath d='M90 110V48'/%3E%3Cpath d='M135 110V78'/%3E%3Cpath d='M24 82h132' stroke-dasharray='8 10'/%3E%3C/g%3E%3C/svg%3E">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet">
+<style>
+:root,[data-theme="light"]{--bg:#f7f6f2;--surf:#f9f8f5;--surf2:#fbfbf9;--surfoff:#f3f0ec;--border:oklch(0.2 0.01 80/.12);--text:#28251d;--muted:#7a7974;--faint:#bab9b4;--pri:#01696f;--prih:#0c4e54;--ok:#437a22;--err:#c0392b;--warn:#da7101;--sm:0 1px 2px oklch(0.2 0.01 80/.06);--md:0 4px 12px oklch(0.2 0.01 80/.08);--rsm:.375rem;--rmd:.5rem;--rlg:.75rem;--rxl:1rem;--rfull:999px;--xs:clamp(.72rem,.68rem + .2vw,.8rem);--sm2:clamp(.82rem,.76rem + .3vw,.95rem);--base:clamp(.95rem,.9rem + .25vw,1.1rem);--lg:clamp(1.1rem,1rem + .5vw,1.4rem);--xl:clamp(1.4rem,1.1rem + 1.2vw,2rem);--font:'Satoshi','Inter',sans-serif;--tr:180ms cubic-bezier(.16,1,.3,1)}
+[data-theme="dark"]{--bg:#171614;--surf:#1c1b19;--surf2:#201f1d;--surfoff:#2d2c2a;--border:oklch(1 0 0/.08);--text:#cdccca;--muted:#979593;--faint:#5a5957;--pri:#4f98a3;--prih:#227f8b;--ok:#79c154;--err:#eb6b6b;--warn:#fdab43;--sm:0 1px 2px oklch(0 0 0/.2);--md:0 4px 12px oklch(0 0 0/.3)}
+*,::before,::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:none;-webkit-font-smoothing:antialiased}
+body{min-height:100dvh;background:var(--bg);color:var(--text);font-family:var(--font);font-size:var(--sm2);line-height:1.55;padding-bottom:max(env(safe-area-inset-bottom),20px)}
+button,input{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+img,canvas{display:block;max-width:100%}
+
+.app{max-width:1160px;margin:0 auto;padding:0 16px}
+header{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:calc(12px + env(safe-area-inset-top)) 0 12px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);background:color-mix(in oklch,var(--bg) 88%,transparent);border-bottom:1px solid var(--border);margin-bottom:24px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:var(--base)}
+.logo svg{color:var(--pri)}
+.hdr-right{display:flex;gap:10px}
+.icon-btn{width:44px;height:44px;display:grid;place-items:center;background:var(--surf);border:1px solid var(--border);border-radius:var(--rmd)}
+.icon-btn:hover{background:var(--surfoff)}
+
+.layout{display:grid;grid-template-columns:390px 1fr;gap:20px;align-items:start}
+@media(max-width:860px){.layout{grid-template-columns:1fr}}
+
+.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--rxl);box-shadow:var(--sm);overflow:hidden}
+.ch{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ct{font-weight:700;font-size:var(--sm2)}
+.cb{padding:16px 18px;display:grid;gap:14px}
+
+.picker-zone{border:2px dashed var(--border);border-radius:var(--rlg);padding:32px 20px;text-align:center;background:var(--surf2);transition:border-color var(--tr)}
+.picker-zone:hover{border-color:var(--pri)}
+.picker-zone strong{display:block;font-size:var(--base);margin-bottom:8px}
+.picker-zone p{font-size:var(--xs);color:var(--muted);max-width:34ch;margin:0 auto 16px}
+.prev-img{border-radius:var(--rlg);background:#000;max-height:180px;width:100%;object-fit:contain}
+
+label.btn-pri{display:inline-flex}
+.btn-pri,.btn-sec{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:var(--rmd);font-weight:600;font-size:var(--sm2);transition:background var(--tr)}
+.btn-pri{background:var(--pri);color:#fff}.btn-pri:hover{background:var(--prih)}
+.btn-sec{background:var(--surfoff);border:1px solid var(--border)}.btn-sec:hover{background:var(--surf2)}
+.tb{display:flex;gap:8px;flex-wrap:wrap}
+
+.field{display:grid;gap:5px}
+.field label{font-size:var(--xs);color:var(--muted)}
+.inp{height:44px;padding:0 12px;background:var(--surfoff);border:1px solid var(--border);border-radius:var(--rmd);font-variant-numeric:tabular-nums lining-nums}
+.inp:focus{outline:2px solid var(--pri);outline-offset:2px}
+.row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+
+.prog{display:none;align-items:center;gap:10px;padding:12px 0;font-size:var(--xs);color:var(--muted)}
+.prog.show{display:flex}
+.spin{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--pri);border-radius:50%;animation:spin .75s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.banner{display:none;padding:10px 14px;border-radius:var(--rmd);font-size:var(--xs);line-height:1.6}
+.banner.show{display:block}
+.banner.warn{background:color-mix(in oklch,var(--warn) 12%,var(--surf));border:1px solid color-mix(in oklch,var(--warn) 30%,var(--border));color:var(--warn)}
+.banner.ok{background:color-mix(in oklch,var(--ok) 12%,var(--surf));border:1px solid color-mix(in oklch,var(--ok) 30%,var(--border));color:var(--ok)}
+
+.mgrid{display:grid;gap:4px}
+.mcell{height:42px;text-align:center;background:var(--surfoff);border:1px solid var(--border);border-radius:var(--rsm);font-variant-numeric:tabular-nums lining-nums;font-size:var(--xs);padding:0 4px;transition:border-color var(--tr)}
+.mcell:focus{outline:2px solid var(--pri);outline-offset:1px;border-color:transparent}
+.mcell.ocr-filled{border-color:color-mix(in oklch,var(--pri) 50%,var(--border))}
+.mcell.needs-check{border-color:color-mix(in oklch,var(--warn) 60%,var(--border))}
+
+.tips{display:grid;gap:8px;font-size:var(--xs);color:var(--muted)}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--surfoff);padding:12px;border-radius:var(--rmd)}
+.stat .k{font-size:var(--xs);color:var(--muted);margin-bottom:4px}
+.stat .v{font-weight:700;font-size:var(--lg);font-variant-numeric:tabular-nums lining-nums}
+.ok{color:var(--ok)}.bad{color:var(--err)}.warn{color:var(--warn)}
+
+.heat-wrap{display:grid;gap:8px}
+.axis{display:flex;justify-content:space-between;font-size:var(--xs);color:var(--faint)}
+.heatmap{display:grid;gap:5px}
+.cell{border-radius:var(--rmd);display:grid;place-items:center;padding:4px;font-size:var(--xs);font-weight:700;font-variant-numeric:tabular-nums lining-nums;min-height:52px;position:relative;transition:transform var(--tr)}
+.cell:hover{transform:scale(1.06);z-index:2}
+.cell.placeholder{background:var(--surfoff);color:var(--faint);border:1px dashed var(--border)}
+.cell.out{box-shadow:inset 0 0 0 2.5px rgba(255,255,255,.7),0 0 0 2px var(--err)}
+.lgnd{display:grid;gap:5px}
+.lgnd-bar{height:11px;border-radius:var(--rfull);background:linear-gradient(90deg,#3954d8,#2ecf6f 50%,#e25050)}
+.lgnd-lbl{display:flex;justify-content:space-between;font-size:var(--xs);color:var(--muted)}
+
+.advice{display:grid;gap:7px;font-size:var(--xs);color:var(--muted);line-height:1.65}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="logo">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <rect x="2" y="14" width="20" height="4" rx="1"/>
+      <path d="M6 14V8M12 14V6M18 14V10"/>
+      <path d="M2 10h20" stroke-dasharray="2 2"/>
+    </svg>
+    Bed Level Visualizer
+  </div>
+  <div class="hdr-right">
+    <button id="installBtn" class="btn-sec" style="display:none">Install</button>
+    <button id="themeBtn" class="icon-btn" aria-label="Toggle theme">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- LEFT: input panel -->
+  <div class="card">
+    <div class="ch"><span class="ct">Input</span><span id="ocrLabel" style="font-size:var(--xs);color:var(--muted)"></span></div>
+    <div class="cb">
+      <div class="picker-zone" id="dropZone">
+        <strong>Pick from photo library</strong>
+        <p>Crop the mesh area in Photos first. OpenCV finds each box automatically, then OCR reads them one by one.</p>
+        <label class="btn-pri" style="cursor:pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Pick Photo
+          <input id="fileInput" type="file" accept="image/*" style="display:none">
+        </label>
+      </div>
+      <img id="preview" class="prev-img" alt="Mesh photo preview" hidden>
+      <div id="prog" class="prog"><div class="spin"></div><span id="progTxt">Starting…</span></div>
+      <div id="banner" class="banner warn"></div>
+
+      <div class="row">
+        <div class="field"><label>Rows</label><input id="rowsIn" class="inp" type="number" min="2" max="12" value="6" style="width:72px"></div>
+        <div class="field"><label>Columns</label><input id="colsIn" class="inp" type="number" min="2" max="12" value="6" style="width:72px"></div>
+        <div class="field"><label>Tolerance (mm)</label><input id="tolIn" class="inp" type="number" min="0.01" max="1" step="0.05" value="0.20" style="width:90px"></div>
+      </div>
+
+      <div class="tb">
+        <button class="btn-sec" id="buildBtn">Build Grid</button>
+        <button class="btn-sec" id="sampleBtn">Load Sample</button>
+        <button class="btn-sec" id="clearBtn">Clear</button>
+        <button class="btn-pri" id="vizBtn">Visualize ↗</button>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <strong style="font-size:var(--sm2)">Editable grid</strong>
+          <span id="cellStatus" style="font-size:var(--xs);color:var(--muted)">No scan yet.</span>
+        </div>
+        <div id="mgrid" class="mgrid"></div>
+      </div>
+
+      <div class="tips">
+        <div>• Crop in Photos so <em>only</em> the number grid is visible — no buttons or labels.</div>
+        <div>• OpenCV finds the boxes; OCR reads each one. Flagged cells (orange border) need a quick check.</div>
+        <div>• Install: Safari → Share → Add to Home Screen.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: heatmap panel -->
+  <div class="card">
+    <div class="ch"><span class="ct">Bed Mesh Heatmap</span><span id="tolBadge" style="font-size:var(--xs);color:var(--muted)">±0.20 mm</span></div>
+    <div class="cb">
+      <div class="stat-grid" id="stats"></div>
+      <div class="heat-wrap">
+        <div class="axis"><span>Back-left</span><span>Back-right</span></div>
+        <div id="heatmap" class="heatmap"></div>
+        <div class="axis"><span>Front-left</span><span>Front-right</span></div>
+        <div class="lgnd"><div class="lgnd-bar"></div><div class="lgnd-lbl"><span>More negative</span><span>Near 0</span><span>More positive</span></div></div>
+      </div>
+      <div id="advice" class="advice"></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+// ── state ─────────────────────────────────────────────────────────────────────
+let ROWS = 6, COLS = 6;
+let deferredPrompt = null;
+let imgURL = null;
+let ocrFilledCount = 0;
+
+const SAMPLE = [
+  0.09,-0.00,-0.05,-0.03,0.03,0.08,
+  0.09,-0.02,-0.09,-0.10,-0.06,0.02,
+  0.00,-0.06,-0.10,-0.10,-0.07,0.02,
+  0.12,0.06,0.08,0.08,0.07,0.14,
+  0.08,0.05,0.07,0.08,0.03,0.09,
+  0.31,0.28,0.30,0.32,0.36,0.45
+];
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+function $(id){ return document.getElementById(id); }
+function setProgress(show, txt=''){
+  $('prog').classList.toggle('show', show);
+  if(txt) $('progTxt').textContent = txt;
+}
+function setBanner(msg='', type='warn'){
+  const b = $('banner');
+  b.textContent = msg;
+  b.className = 'banner' + (msg ? ` show ${type}` : '');
+}
+function loadScript(src){
+  return new Promise((res,rej)=>{
+    if(document.querySelector(`script[src="${src}"]`)){res();return;}
+    const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);
+  });
+}
+function loadImg(src){
+  return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src;});
+}
+function fmt(n,d=3){ return (n>=0?'+':'')+n.toFixed(d); }
+function avg(arr){ return arr.reduce((a,b)=>a+b,0)/arr.length; }
+
+// ── grid UI ───────────────────────────────────────────────────────────────────
+function buildGrid(fill=[]){
+  ROWS = Math.max(2,Math.min(12,parseInt($('rowsIn').value)||6));
+  COLS = Math.max(2,Math.min(12,parseInt($('colsIn').value)||6));
+  const g = $('mgrid');
+  g.style.gridTemplateColumns = `repeat(${COLS},1fr)`;
+  g.innerHTML = '';
+  for(let i=0;i<ROWS*COLS;i++){
+    const inp = document.createElement('input');
+    inp.type='number'; inp.step='0.01'; inp.className='mcell';
+    inp.value = Number.isFinite(fill[i]) ? fill[i].toFixed(2) : '0.00';
+    inp.setAttribute('aria-label',`Cell ${i+1}`);
+    inp.addEventListener('input', visualize);
+    g.appendChild(inp);
+  }
+  ocrFilledCount = 0;
+  $('cellStatus').textContent = 'Grid ready.';
+  visualize();
+}
+function getCells(){ return [...$('mgrid').querySelectorAll('input')]; }
+function getValues(){ return getCells().map(i=>parseFloat(i.value)||0); }
+function clearGrid(){ getCells().forEach(i=>{i.value='0.00';i.className='mcell';}); visualize(); }
+function loadSample(){
+  $('rowsIn').value=6; $('colsIn').value=6;
+  buildGrid(SAMPLE);
+  $('cellStatus').textContent='Sample values loaded.';
+  setBanner('Loaded sample Neptune 4 Max mesh.','ok');
+}
+
+// ── heatmap ───────────────────────────────────────────────────────────────────
+function colorFor(v,absMax){
+  const t=Math.max(0,Math.min(1,(v+absMax)/(2*absMax)));
+  let r,g,b;
+  if(t<.5){const x=t/.5;r=Math.round(57*(1-x)+46*x);g=Math.round(84*(1-x)+207*x);b=Math.round(216*(1-x)+111*x);}
+  else{const x=(t-.5)/.5;r=Math.round(46*(1-x)+226*x);g=Math.round(207*(1-x)+80*x);b=Math.round(111*(1-x)+80*x);}
+  return `rgb(${r},${g},${b})`;
+}
+function contrast(rgb){ const m=rgb.match(/\d+/g).map(Number);return(0.299*m[0]+0.587*m[1]+0.114*m[2])/255>.58?'#111':'#fff'; }
+
+function visualize(){
+  const vals=getValues(), tol=parseFloat($('tolIn').value)||0.2;
+  $('tolBadge').textContent=`±${tol.toFixed(2)} mm`;
+  const mn=Math.min(...vals),mx=Math.max(...vals),sp=mx-mn,mn_=avg(vals);
+  const inT=vals.filter(v=>Math.abs(v)<=tol).length;
+  const worst=vals.reduce((b,v,i)=>Math.abs(v)>Math.abs(vals[b])?i:b,0);
+  const wr=Math.floor(worst/COLS)+1,wc=worst%COLS+1;
+  $('stats').innerHTML=`
+    <div class="stat"><div class="k">Min</div><div class="v ${mn<-tol?'bad':'ok'}">${fmt(mn)}</div></div>
+    <div class="stat"><div class="k">Max</div><div class="v ${mx>tol?'bad':'ok'}">${fmt(mx)}</div></div>
+    <div class="stat"><div class="k">Spread</div><div class="v ${sp<=tol*2?'ok':sp<=0.4?'warn':'bad'}">${sp.toFixed(3)} mm</div></div>
+    <div class="stat"><div class="k">In tolerance</div><div class="v ${inT===vals.length?'ok':inT>=vals.length*.8?'warn':'bad'}">${inT}/${vals.length}</div></div>
+    <div class="stat"><div class="k">Average</div><div class="v">${fmt(mn_)}</div></div>
+    <div class="stat"><div class="k">Worst point</div><div class="v bad">R${wr} C${wc}</div></div>`;
+  const hm=$('heatmap');
+  hm.style.gridTemplateColumns=`repeat(${COLS},1fr)`;
+  hm.innerHTML='';
+  const absMax=Math.max(Math.abs(mn),Math.abs(mx),.001);
+  vals.forEach((v,i)=>{
+    const d=document.createElement('div');
+    d.className='cell';
+    const isZero=(v===0&&getCells()[i].value==='0.00');
+    if(isZero){ d.classList.add('placeholder'); }
+    else{
+      const col=colorFor(v,absMax);
+      d.style.background=col; d.style.color=contrast(col);
+      if(Math.abs(v)>tol) d.classList.add('out');
+    }
+    d.title=`R${Math.floor(i/COLS)+1} C${i%COLS+1}: ${fmt(v)} mm`;
+    d.textContent=isZero?'0.00':fmt(v,2);
+    hm.appendChild(d);
+  });
+  // advice
+  const fr=vals.slice((ROWS-1)*COLS),bk=vals.slice(0,COLS);
+  const lf=vals.filter((_,i)=>i%COLS===0),rt=vals.filter((_,i)=>i%COLS===COLS-1);
+  const tips=[];
+  if(sp>0.4) tips.push('Large spread — tram the bed manually before relying on mesh compensation.');
+  if(avg(fr)>avg(bk)+0.1) tips.push('Front is higher than the back — lower front screws slightly.');
+  if(avg(bk)>avg(fr)+0.1) tips.push('Back is higher than the front — lower rear screws slightly.');
+  if(avg(lf)>avg(rt)+0.1) tips.push('Left side is higher — lower left screws slightly.');
+  if(avg(rt)>avg(lf)+0.1) tips.push('Right side is higher — lower right screws slightly.');
+  if(ocrFilledCount>0&&ocrFilledCount<ROWS*COLS) tips.push(`OCR filled ${ocrFilledCount}/${ROWS*COLS} cells. Orange-bordered cells had low confidence — check them.`);
+  if(inT===vals.length) tips.push('All points within tolerance — looking great!');
+  else if(!tips.length) tips.push('Mesh looks usable. Print a test layer and fine-tune Z-offset if needed.');
+  $('advice').innerHTML=tips.map(t=>`<div>• ${t}</div>`).join('');
+}
+
+// ── Neptune-specific value normalizer ─────────────────────────────────────────
+// Neptune 4 Max values are always between -1.0 and +1.0.
+// OCR often drops the leading "0." and returns "23" for "0.23" or "4" for "0.04".
+function normalizeNeptuneValue(raw){
+  if(raw===null||raw==='') return null;
+  let s = raw.replace(/\s/g,'').replace(/[O]/g,'0').replace(/[,;]/g,'.');
+  if(!s) return null;
+  // Handle sign prefix: "-" at start
+  let sign = 1;
+  if(s.startsWith('-')){ sign=-1; s=s.slice(1); }
+  const n = parseFloat(s);
+  if(!Number.isFinite(n)) return null;
+  // Has decimal point → trust it, just apply Neptune clamp
+  if(s.includes('.')){
+    const v = sign*n;
+    if(Math.abs(v) > 2) return null; // clearly wrong
+    return v;
+  }
+  // No decimal point: raw integer
+  // Neptune values are tiny (usually 0.01–0.45)
+  // "23" → 0.23, "4" → 0.04, "10" → 0.10, "100" → likely 1.00 (unusual but keep)
+  const int = Math.round(n);
+  if(int === 0) return 0;
+  if(int <= 9) return sign * int / 100;      // "4" → 0.04
+  if(int <= 99) return sign * int / 100;     // "23" → 0.23
+  if(int <= 999) return sign * int / 1000;   // "100" → 0.100
+  return null; // too large
+}
+
+// ── OpenCV + per-cell Tesseract pipeline ──────────────────────────────────────
+async function runPipeline(file){
+  setBanner('');
+  setProgress(true,'Loading OpenCV.js…');
+  try{
+    // Load OpenCV.js (WASM build)
+    if(!window.cv){
+      await loadScript('https://docs.opencv.org/4.10.0/opencv.js');
+      await waitForOpenCV();
+    }
+    setProgress(true,'Loading Tesseract…');
+    if(!window.Tesseract){
+      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    }
+
+    setProgress(true,'Preprocessing image…');
+    const img = await loadImg(imgURL);
+    const srcCanvas = imageToCanvas(img);
+    const W = srcCanvas.width, H = srcCanvas.height;
+
+    // ── OpenCV: find grid cells ──────────────────────────────────────────────
+    setProgress(true,'OpenCV: detecting grid boxes…');
+    const src = cv.imread(srcCanvas);
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+    // Blur slightly
+    const blurred = new cv.Mat();
+    const ksize = new cv.Size(5,5);
+    cv.GaussianBlur(gray, blurred, ksize, 0);
+
+    // Threshold: text and box borders are bright (>120) on dark bg (~60-90)
+    const thresh = new cv.Mat();
+    cv.threshold(blurred, thresh, 110, 255, cv.THRESH_BINARY);
+
+    // Morphological close to connect fragmented box borders
+    const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3,3));
+    const closed = new cv.Mat();
+    cv.morphologyEx(thresh, closed, cv.MORPH_CLOSE, kernel);
+
+    // Find contours
+    const contours = new cv.MatVector();
+    const hierarchy = new cv.Mat();
+    cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    // Filter contours to find cell-sized rectangles
+    const cellArea = (W/COLS)*(H/ROWS);
+    const minA = cellArea * 0.15, maxA = cellArea * 3.0;
+    const boxes = [];
+    for(let i=0;i<contours.size();i++){
+      const cnt = contours.get(i);
+      const area = cv.contourArea(cnt);
+      if(area < minA || area > maxA){ cnt.delete(); continue; }
+      const rect = cv.boundingRect(cnt);
+      const aspect = rect.width / rect.height;
+      if(aspect < 1.2 || aspect > 7){ cnt.delete(); continue; }
+      // Must be reasonably tall (at least 8% of image height)
+      if(rect.height < H*0.08){ cnt.delete(); continue; }
+      boxes.push({x:rect.x, y:rect.y, w:rect.width, h:rect.height});
+      cnt.delete();
+    }
+
+    // Cleanup OpenCV mats
+    src.delete(); gray.delete(); blurred.delete(); thresh.delete();
+    kernel.delete(); closed.delete(); contours.delete(); hierarchy.delete();
+
+    let cellRects = [];
+
+    if(boxes.length >= ROWS*COLS * 0.6){
+      // Good detection — sort into grid order
+      cellRects = sortBoxesIntoGrid(boxes, ROWS, COLS);
+      $('ocrLabel').textContent = `OpenCV: ${boxes.length} boxes found`;
+    } else {
+      // Fallback: uniform slice
+      $('ocrLabel').textContent = `Fallback: uniform ${ROWS}×${COLS} slice`;
+      cellRects = uniformSlice(W, H, ROWS, COLS);
+    }
+
+    // ── Per-cell Tesseract OCR ───────────────────────────────────────────────
+    const total = ROWS*COLS;
+    const values = Array(total).fill(null);
+    const confidence = Array(total).fill(0);
+
+    // Init Tesseract worker once
+    setProgress(true,`OCR: reading cells (0/${total})…`);
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: ()=>{}
+    });
+    await worker.setParameters({
+      tessedit_char_whitelist: '0123456789.-',
+      tessedit_pageseg_mode: '8', // single word
+    });
+
+    for(let i=0;i<total;i++){
+      setProgress(true,`OCR: cell ${i+1}/${total}…`);
+      const cell = cellRects[i];
+      if(!cell){ continue; }
+      const cellCanvas = cropAndPrepare(srcCanvas, cell.x, cell.y, cell.w, cell.h);
+      const {data} = await worker.recognize(cellCanvas);
+      const raw = data.text.trim();
+      const conf = data.confidence;
+      confidence[i] = conf;
+      values[i] = normalizeNeptuneValue(raw);
+    }
+    await worker.terminate();
+
+    // Apply to grid
+    const filled = values.map(v => Number.isFinite(v) ? v : 0);
+    ocrFilledCount = values.filter(v=>v!==null).length;
+
+    buildGrid(filled);
+
+    // Mark low-confidence cells
+    const cells = getCells();
+    let lowConf = 0;
+    values.forEach((v,i)=>{
+      if(v===null){
+        cells[i].classList.add('needs-check');
+        lowConf++;
+      } else if(confidence[i] < 60){
+        cells[i].classList.add('needs-check');
+        lowConf++;
+      } else {
+        cells[i].classList.add('ocr-filled');
+      }
+    });
+
+    $('cellStatus').textContent = `Filled ${ocrFilledCount}/${total} cells.`;
+    if(lowConf>0){
+      setBanner(`${lowConf} cells flagged (orange border) — low OCR confidence. Tap to fix them.`,'warn');
+    } else {
+      setBanner(`All ${total} cells read successfully!`,'ok');
+    }
+    setProgress(false);
+    visualize();
+
+  } catch(err){
+    console.error(err);
+    setProgress(false);
+    setBanner(`Error during processing: ${err.message}. Values left at 0.00 — fix manually.`,'warn');
+    buildGrid(Array(ROWS*COLS).fill(0));
+  }
+}
+
+function waitForOpenCV(){
+  return new Promise((res)=>{
+    if(window.cv && cv.Mat){ res(); return; }
+    const check = setInterval(()=>{ if(window.cv && cv.Mat){ clearInterval(check); res(); } },150);
+  });
+}
+
+function imageToCanvas(img){
+  // Limit to ~2400px wide to keep memory reasonable on mobile
+  const MAX=2400;
+  const scale = img.width > MAX ? MAX/img.width : 1;
+  const c=document.createElement('canvas');
+  c.width=Math.round(img.width*scale);
+  c.height=Math.round(img.height*scale);
+  c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+  return c;
+}
+
+// Crop, invert for dark-bg white-text, upscale 3x, boost contrast
+function cropAndPrepare(srcCanvas, x, y, w, h){
+  const INSET=0.07;
+  const ix=Math.round(x+w*INSET), iy=Math.round(y+h*INSET);
+  const iw=Math.round(w*(1-2*INSET)), ih=Math.round(h*(1-2*INSET));
+  const SCALE=3;
+  const out=document.createElement('canvas');
+  out.width=Math.max(1,iw*SCALE); out.height=Math.max(1,ih*SCALE);
+  const ctx=out.getContext('2d',{willReadFrequently:true});
+  // Draw source cell upscaled
+  ctx.drawImage(srcCanvas,ix,iy,iw,ih,0,0,out.width,out.height);
+  // Apply contrast and invert (white text on dark bg → black on white)
+  const imgData=ctx.getImageData(0,0,out.width,out.height);
+  const d=imgData.data;
+  for(let i=0;i<d.length;i+=4){
+    const gray=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    // Invert: bright text (>130) → dark, dark bg → white
+    const v = gray > 115 ? 0 : 255;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(imgData,0,0);
+  return out;
+}
+
+// Sort boxes into ROWS×COLS grid by position
+function sortBoxesIntoGrid(boxes, rows, cols){
+  if(boxes.length===0) return uniformSlice(0,0,rows,cols);
+  // Sort by y first, cluster into rows
+  boxes.sort((a,b)=>a.y-b.y);
+  const rowH = (boxes[boxes.length-1].y - boxes[0].y) / (rows-1) || 50;
+  const clusters = [];
+  let cur = [boxes[0]];
+  for(let i=1;i<boxes.length;i++){
+    if(Math.abs(boxes[i].y - cur[0].y) < rowH*0.6) cur.push(boxes[i]);
+    else { clusters.push(cur); cur=[boxes[i]]; }
+  }
+  clusters.push(cur);
+  // Sort each cluster by x
+  clusters.forEach(cl=>cl.sort((a,b)=>a.x-b.x));
+  // Build flat grid
+  const result=[];
+  for(let r=0;r<rows;r++){
+    const row=clusters[r]||[];
+    for(let c=0;c<cols;c++){
+      result.push(row[c]||null);
+    }
+  }
+  return result;
+}
+
+// Uniform slice fallback
+function uniformSlice(W, H, rows, cols){
+  const cw=W/cols, ch=H/rows;
+  const result=[];
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+    result.push({x:Math.round(c*cw),y:Math.round(r*ch),w:Math.round(cw),h:Math.round(ch)});
+  }
+  return result;
+}
+
+// ── event wiring ──────────────────────────────────────────────────────────────
+$('fileInput').addEventListener('change',async e=>{
+  const f=e.target.files&&e.target.files[0];
+  if(!f) return;
+  if(imgURL) URL.revokeObjectURL(imgURL);
+  imgURL=URL.createObjectURL(f);
+  const prev=$('preview'); prev.src=imgURL; prev.hidden=false;
+  await runPipeline(f);
+});
+$('buildBtn').addEventListener('click',()=>buildGrid());
+$('sampleBtn').addEventListener('click',loadSample);
+$('clearBtn').addEventListener('click',clearGrid);
+$('vizBtn').addEventListener('click',visualize);
+$('tolIn').addEventListener('input',visualize);
+$('rowsIn').addEventListener('change',buildGrid);
+$('colsIn').addEventListener('change',buildGrid);
+$('themeBtn').addEventListener('click',()=>{
+  const r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';
+  r.setAttribute('data-theme',n);
+});
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault(); deferredPrompt=e; $('installBtn').style.display='inline-flex';
+});
+$('installBtn').addEventListener('click',async()=>{
+  if(deferredPrompt){ deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; $('installBtn').style.display='none'; }
+  else setBanner('On iPhone: Safari → Share → Add to Home Screen','warn');
+});
+if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+
+// ── init ──────────────────────────────────────────────────────────────────────
+buildGrid(SAMPLE);
+$('cellStatus').textContent='Sample loaded — pick a photo to scan.';
+</script>
+</body>
+</html>
